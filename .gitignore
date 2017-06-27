@@ -1,0 +1,6 @@
+*.swp
+*__pycache__/
+Misc/
+Preliminary/mysqrtm.py
+Preliminary/CircleFitByPratt.py
+
