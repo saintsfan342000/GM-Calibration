@@ -17,17 +17,18 @@ Investigate the difference between calculating log strains by
 (3) n.log(F22-1)
 (4) n.log(Virst extensometer over /- 0.1")
 '''
-projects = [1,2,3,4,7,8,10,11]
-prefix = 'GMPT'
+prefix = 'TTGM'
 
 if prefix == 'TTGM':
     ht = .05 # the +/- height that defines my gagelen
     thickness = 0.04
     key = n.genfromtxt('../../TTSummary.dat', delimiter=',', usecols=(0,3))
+    projects = key[:,0].astype(int)
 elif prefix == 'GMPT':
     ht = .5
     thickness = 0.05
     key = n.genfromtxt('../../PTSummary.dat', delimiter=',', usecols=(0,4))
+    projects = key[:,0].astype(int)
 else:
     raise ValueError('Invalid prefix name given')
 
@@ -53,10 +54,12 @@ for expt in projects:
 
 
     datalist = ['NEx_aram', 'NEy_aram', 'NExy_aram', 'G_aram',
-                   'NEx_alt', 'NEy_alt', 'G_alt',
-                   'ex_U', 'ey_U',
-                   'ex_F', 'ey_F', 
-                   'ex_eigU', 'ey_eigU']
+                'NEx_RUR', 'NEy_RUR', 'NExy_RUR','G_RUR',
+                'NEx_halt', 'NEy_halt', 'G_halt',
+                'ex_U', 'ey_U',
+                'ex_RUR', 'ey_RUR',
+                'ex_F', 'ey_F', 
+                'ex_eigU', 'ey_eigU']
     data_mean = n.empty((len(PS), len(datalist)+5), dtype=n.float64)
     data_med = n.empty_like(data_mean)
 
@@ -74,10 +77,7 @@ for expt in projects:
         q_mid = Q.min()+q_rng/2
           
         rng = (n.abs(A[:,3])<=ht) & (Q>=q_mid-q_rng/4) & (Q<=q_mid+q_rng/4)
-        
         F=A[rng,-4:].reshape(-1,2,2)   # A "stack" of 2x2 deformation gradients 
-        FtF = n.einsum('...ji,...jk',F,F)
-        U = mysqrtm( FtF )     #Explicit calculation of sqrtm
 
         # Filter
         if proj[:4] == 'TTGM':
@@ -93,7 +93,6 @@ for expt in projects:
         keeps = (rat>=ratmean-1.5*ratdev) & (rat<=ratmean+1.5*ratdev)
 
         F = F.compress(keeps, axis=0)
-        U = U.compress(keeps, axis=0)
 
         #Filter again
         if proj[:4] == 'TTGM':
@@ -109,19 +108,34 @@ for expt in projects:
         keeps = (rat>=ratmean-0.5*ratdev) & (rat<=ratmean+0.5*ratdev)
 
         F = F.compress(keeps, axis=0)
-        U = U.compress(keeps, axis=0)
-
-        NEx_aram = U[:,0,0] - 1
-        NEy_aram = U[:,1,1] - 1
-        NExy_aram = U[:,0,1]
+        FtF = n.einsum('...ji,...jk',F,F)
+        U = mysqrtm( FtF )     #Explicit calculation of sqrtm
+        Io =n.tile(n.eye(2),(U.shape[0],1,1)) 
+        Uinv = n.linalg.solve(U,Io)
+        R =  n.einsum('...ij,...jk',F,Uinv)
+        NE = U - Io
+        NErot = n.einsum('...ij,...jk,...lk',R,NE,R)
+        # Aramis nominal strains
+        NEx_aram = NE[:,0,0]
+        NEy_aram = NE[:,1,1]
+        NExy_aram = NE[:,0,1]
         G_aram = n.arctan(NExy_aram/(1+NEx_aram)) + n.arctan(NExy_aram/(1+NEy_aram))
-        NEx_alt = F[:,0,0]-1
-        NEy_alt = F[:,1,1]-1
-        G_alt = n.arctan(F[:,0,1]/F[:,1,1]);
-        
+        # Rotated Aramis nominal strains
+        NEx_RUR = NErot[:,0,0]
+        NEy_RUR = NErot[:,1,1]
+        NExy_RUR = NErot[:,0,1]
+        G_RUR = n.arctan(NExy_RUR/(1+NEx_RUR)) + n.arctan(NExy_RUR/(1+NEy_RUR))
+        # Haltom strain definitions
+        NEx_halt = F[:,0,0]-1
+        NEy_halt = F[:,1,1]-1
+        G_halt = n.arctan(F[:,0,1]/F[:,1,1]);
+        # Direct log of U 
         ex_U, ey_U = n.log(U[:,0,0]), n.log(U[:,1,1])
+        # Log of rotated NE
+        ex_RUR, ey_RUR = n.log(NEx_RUR+1), n.log(NEy_RUR+1)
+        # Direct log of F
         ex_F, ey_F = n.log(F[:,0,0]), n.log(F[:,1,1])
-       
+        # Eigen value and vector of U
         eigU, V = eigh(U)
         LEprin = n.log(eigU)
         # Now rotate the principle log strains back to x, y using the eigenvectors
