@@ -1,4 +1,5 @@
 import numpy as n
+from numpy import nanmean, nanstd
 from scipy.integrate import cumtrapz
 from scipy.io import loadmat
 from scipy.interpolate import interp1d
@@ -32,11 +33,11 @@ if makeplots:
 key = n.genfromtxt('../PTSummary.dat', delimiter=',')
 projects = key[:,0].astype(int)
 
-projects = [2]
+#projects = [2]
 
 for expt in projects:
 
-    proj = '{}-{}'.format(prefix,expt)
+    proj = '\n{}-{}'.format(prefix,expt)
     print(proj)
     alpha, alpha_true, Rm, thickness = key[ key[:,0]==expt ].ravel()[4:8]
 
@@ -75,14 +76,14 @@ for expt in projects:
 
         # Filter
         rat = (F[:,0,0]-1) / (F[:,1,1]-1)
-        ratmean = rat.mean()
-        ratdev = rat.std()
+        ratmean = nanmean(rat)
+        ratdev = nanstd(rat)
         keeps = (rat>=ratmean-1.5*ratdev) & (rat<=ratmean+1.5*ratdev)
         F = F.compress(keeps, axis=0)
         # Filter again
         rat = (F[:,0,0]-1) / (F[:,1,1]-1)
-        ratmean = rat.mean()
-        ratdev = rat.std()
+        ratmean = nanmean(rat)
+        ratdev = nanstd(rat)
         keeps = (rat>=ratmean-0.5*ratdev) & (rat<=ratmean+0.5*ratdev)
         F = F.compress(keeps, axis=0)
         
@@ -107,7 +108,7 @@ for expt in projects:
     # nancheck
     locs = n.where(n.any(n.isnan(D),axis=1))[0]
     if len(locs)>=1:
-        print('Warning! nans found in stages' + (' {}'*len(locs)).format(*locs))
+        print('\nWarning! nans found in stages' + (' {}'*len(locs)).format(*locs))
         # Replace nan rows with preceding
         D[locs,1:] = D[locs-1,1:]
 
