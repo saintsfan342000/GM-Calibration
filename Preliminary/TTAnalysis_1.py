@@ -1,24 +1,41 @@
 import numpy as n
+pi=n.pi
 from numpy import nanmean, nanstd
+from numpy.linalg import eigvalsh, eigh
 from scipy.integrate import cumtrapz
 from scipy.io import loadmat
 from scipy.interpolate import interp1d
-from TrueStsStn import Iterate
+from mysqrtm import mysqrtm
 import os
 
 '''
-For PT Experiments
+This script is very exploratoy.
+
+For TT Experiments
 (1)Log strains
 (2)True Stresses
 (3)Log plastic strains
 (4)Plastic work
+
+In this script, the hoop stress and strain are not used in calculating the plastic work.
+The hoop stress is needed, though, for the Barlat equivalent stress.
+Thus this script gives a "first estimate" of the plastic work.
+
+To calculate the plastic axial strain, I neglect the hoop contribution. i.e.,
+ex_p = ex - (sig_x - nu*sig_q)/E , but sig_q is neglected all together.
+
+In addition, I calculate the tru thickness in two different ways:
+    (1) Calculating principle stretches from U tensor and assuming incompressibility
+    (2) Forming my own strain tensor = [[F00-1, G/2], [G/2, F11-1]] and getting the principle
+        strains from there, then assume incompressibility
+
 '''
 
-prefix = 'GMPT'
-ht = .5
+prefix = 'TTGM'
+ht = .05
 E = 9750
 nu = 0.319
-makeplots = 1
+makeplots = 0
 if makeplots:
     import matplotlib.pyplot as p
     import figfun as f
@@ -28,28 +45,31 @@ if makeplots:
     p.rcParams['axes.xmargin'] = .02
     p.rcParams['axes.ymargin'] = .02
 
-
-# [0]Expt No., [1]Mon.Day, [2]Material, [3]Tube No., [4]Alpha, [5]Alpha-True, [6]Mean Radius, [7]Thickness, [8]Eccentricity
-key = n.genfromtxt('../PTSummary.dat', delimiter=',')
+# [0]Expt No., [1]Material, [2]Tube No., [3]Alpha, [4]Alpha-True,
+# [5]Mean Radius, [6]Thickness, [7]Eccentricity
+key = n.genfromtxt('../TTSummary.dat', delimiter=',')
+key = key[ n.argsort(key[:,4]) ]
 projects = key[:,0].astype(int)
-
-#projects = [2]
 
 for expt in projects:
 
-    proj = '\n{}-{}'.format(prefix,expt)
-    print(proj)
+    proj = '{}-{}'.format(prefix,expt)
+    print('\n'+proj)
     alpha, alpha_true, Rm, thickness = key[ key[:,0]==expt ].ravel()[4:8]
 
     os.chdir('../{}'.format(proj))
 
-    # [0]Stage, [1]Time, [2]Force(kip), [3]Pressure(ksi), [4]NomAxSts(ksi), [5]NomHoopSts(ksi), [6]LVDT(volt), [7]MTSDisp(in)
-    stf = n.genfromtxt('STPF.dat', delimiter=',')
+   # [0]Stg [1]Time [2]AxSts [3]ShSts [4]AxForce [5]Torque [6]MTS Disp [7]MTS Rot 
+    stf = n.genfromtxt('STF.dat', delimiter=',')
+    force, torque = stf[:,4:6].T
     prof_stgs = n.genfromtxt('prof_stages.dat', delimiter=',', dtype=int)
     stages, Force, P, sig_x, sig_q = stf[:,[0,2,3,4,5]].T
     stages = stages.astype(int)
 
-    # [0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru
+    # [0]Stage, [1]Wp, [2]SigX_Tru, [3]Tau_True, 
+    # [4]ex, [5]eq, [6]exq, [7]e3
+    # [8]ep_x, [9]ep_q, [1]exq_p, [11]ep_3
+    # [10]R_tru, [11]th_tru
     D = n.empty((len(stages),12))
     
     #Progressbar (10 # long)
@@ -57,11 +77,12 @@ for expt in projects:
 
     #Cycle through the stages
     print('#'*20)
-    for stage in stages[:0:-1]:
+    for stage in stages[:0:-1]
         if stage in pbarstages:
             print('#', end='', flush=True)
         # Load up the stage
         name = 'stage_{}'.format(stage)
+
         A = loadmat('{}'.format(proj), variable_names=name)[name]
         #[0]Index_x [1]Index_y [2,3,4]Undef_X,Y,Z inches [5,6,7]Def_X,Y,Z inches [8,9,10,11]DefGrad (11 12 21 22) *)
 
@@ -75,31 +96,91 @@ for expt in projects:
         F=A[rng,-4:].reshape(-1,2,2)   # A "stack" of 2x2 deformation gradients 
 
         # Filter
-        rat = (F[:,0,0]-1) / (F[:,1,1]-1)
+        gamma = n.abs(n.arctan(F[:,0,1]/F[:,1,1]))
+        rat = gamma / (F[:,1,1]-1)
         ratmean = nanmean(rat)
         ratdev = nanstd(rat)
         keeps = (rat>=ratmean-1.5*ratdev) & (rat<=ratmean+1.5*ratdev)
         F = F.compress(keeps, axis=0)
         # Filter again
-        rat = (F[:,0,0]-1) / (F[:,1,1]-1)
+        gamma = n.abs(n.arctan(F[:,0,1]/F[:,1,1]))
+        rat = gamma / (F[:,1,1]-1)
         ratmean = nanmean(rat)
         ratdev = nanstd(rat)
         keeps = (rat>=ratmean-0.5*ratdev) & (rat<=ratmean+0.5*ratdev)
         F = F.compress(keeps, axis=0)
         
+        # First method of strain and true thickness
+        # Use the aramis stretch tensor
+        FtF = n.einsum('...ji,...jk',F,F)
+        U = mysqrtm( FtF )     #Explicit calculation of sqrtm
+        U = U.mean(axis=0)
+        Rtru = R*U[0,0]
+        NE = U - n.eye(2)
+        (eps1,eps2), Q = eigh(NE)
+        e1,e2 = n.log(eps1+1), n.log(eps2+1)
+        Elog_prin = n.array([[e1,0],[0,e2]]) 
+        Elog = (Q.T)@(Elog_prin)@(Q)
+        eq, ex = Elog.diagonal()
+        exq = n.abs(Elog[0,1])
+        G = n.abs(n.arctan(U[0,1]/(U[0,0])) + n.arctan(U[0,1]/(U[1,1])))
+        L1,L2 = eigvalsh(U)
+        th_tru = thickness/(L1*L2)
+        sig_x = force/(2*pi*Rtru*th_tru)
+        sig_q = sig_x*.12 + 5 # Based on my analysis polyfit
+        tau_xq = torque/(2*pi*Rtru**2*th_tru)
+        ep_x = ex - (sig_x-nu*sig_q)/E
+        ep_q = eq - (sig_q-nu*sig_x)/E
+        ep_xq = exq - (1+nu)tau_xq/E
+        Gp = G - 2*(1+nu)*tau_xq/E
+        Wp1 = n.trapz(sig_x,ep_x) + n.trapz(tau_xq,Gp)
+        Wp2 = n.trapz(sig_x,ep_x) + 2*n.trapz(tau_xq,ep_xq)
+        Wp3 = n.trapz(sig_x,ep_x) + n.trapz(tau_xq,Gp) + n.trapz(sig_q,ep_q)
+
+        # [0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True [4]Tau_XQ_Tru, 
+        # [4]ex, [5]eq, [6]2*exq, [7]G,
+        # [8]ep_x, [9]ep_q, [9]ep_3, [10]R_tru, [11]th_tru 
+        D[k] = (stage, Wp,
+                sig_x, sig_q, tau_xq, 
+                ex, eq, 2*exy, G,
+                ep_x, ep_q, 2*ep_exy, Gp
+
+
+
+
         # Haltom strain definitions
-        ex = n.log(F[:,1,1]).mean()
-        eq = n.log(F[:,0,0]).mean()
-        G = n.arctan(F[:,0,1]/F[:,1,1]).mean()
-        Rtru = Rm*(1+eq)
-        
-        (th_tru, tau_x, tau_q, 
-         ep_x, ep_q, ep_3, e3) = Iterate(P[stage], Force[stage], thickness, Rtru, ex, eq, E, nu)
+        epsx = (F[:,1,1] - 1).mean()
+        epsq = (F[:,0,0] - 1).mean()
+        G =  n.arctan(F[:,0,1]/F[:,1,1]).mean()
+
+        # Make my own nominal strain tensor since I decided
+        # this was the best way
+        Enom = n.array([[epsq, G/2],[G/2,epsx]]);
+        (eps1,eps2), Q = eigh(Enom)
+        e1,e2 = n.log(eps1+1), n.log(eps2+1)
+        Elog_prin = n.array([[e1,0],[0,e2]]) 
+        Elog = (Q.T)@(Elog_prin)@(Q)
+
+        Rtru = Rm*(1+epsq)
+
+        # Second method of true thickness
+        # Form my own log strain tensor
+        U = n.array([[eq,G/2],[G/2,ex]])
+        L1,L2 = n.exp(eigvalsh(U))
+        th_tru2 = thickness/(L1*L2)
+        sig_x2 = force/(2*pi*Rtru*th_tru2)
+        tau_xq2 = torque/(2*pi*Rtru**2*th_tru2)
+        ep_x2 = ex - sig_x2/E
+        Gp2 = G - 2*(1+nu)*tau_xq2/E
+        Wp2 = n.trapz(sig_x2,ep_x2) + n.trapz(tau_xq2,Gp2)
 
         D[stage,0] = stage
         D[stage, 2:] = tau_x, tau_q, ex, eq, e3, ep_x, ep_q, ep_3, Rtru, th_tru
 
+        
         ### End iteration through stage
+
+
     D[0] = 0
     D[0,[2,3,10,11]] = sig_x[0], sig_q[0], Rm, thickness
 
