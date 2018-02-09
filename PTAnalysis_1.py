@@ -37,7 +37,7 @@ projects = key[:,0].astype(int)
 
 for expt in projects:
 
-    proj = '\n{}-{}'.format(prefix,expt)
+    proj = '{}-{}'.format(prefix,expt)
     print(proj)
     alpha, alpha_true, Rm, thickness = key[ key[:,0]==expt ].ravel()[4:8]
 
@@ -45,7 +45,6 @@ for expt in projects:
 
     # [0]Stage, [1]Time, [2]Force(kip), [3]Pressure(ksi), [4]NomAxSts(ksi), [5]NomHoopSts(ksi), [6]LVDT(volt), [7]MTSDisp(in)
     stf = n.genfromtxt('STPF.dat', delimiter=',')
-    prof_stgs = n.genfromtxt('prof_stages.dat', delimiter=',', dtype=int)
     stages, Force, P, sig_x, sig_q = stf[:,[0,2,3,4,5]].T
     stages = stages.astype(int)
 
@@ -117,6 +116,8 @@ for expt in projects:
     n.savetxt('CalData.dat', X=D, fmt=fmt,header=header)
 
     if makeplots == True:
+        prof_stgs = n.genfromtxt('prof_stages.dat', delimiter=',', dtype=int)
+
         eps_x = n.exp(D[:,4])-1
         eps_q = n.exp(D[:,5])-1
         fig, ax1, ax4, ax2, ax3 = f.makequad()
@@ -124,7 +125,7 @@ for expt in projects:
         ax4.axis('off')
         ax4.text(.5,.5,'{}-{}.  $\\alpha$ = {}'.format(prefix, expt, alpha_true),
                 ha='center',transform=ax4.transAxes)
-
+        # Wp will go from 0th prof_stg to LL
         Wp = n.linspace(D[prof_stgs[0],1], D[prof_stgs[2],1], 8)
         Dint = interp1d(D[:,1], D, axis=0).__call__(Wp)
         

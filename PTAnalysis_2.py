@@ -32,9 +32,10 @@ if makeplots:
 key = n.genfromtxt('../PTSummary.dat', delimiter=',')
 key = key[ n.argsort(key[:,5]) ]
 projects = key[:,0].astype(int)
+projects
 
 
-Wp_calcs = n.arange(200,1200,200)/1000
+Wp_calcs = n.arange(400,1800,200)/1000
 
 for k,X in enumerate(projects):
 
@@ -79,9 +80,12 @@ for k, X in enumerate(projects):
     #ax1:  Axial True Sts-stn
     if k == 0: cols = []
     for z,w in enumerate(Wp_calcs):
-        line, = ax1.plot(Dint[k,z,7], Dint[k,z,2],'o',ms=4)
         if k == 0:
+            line, = ax1.plot(Dint[k,z,7], Dint[k,z,2],'o',ms=4)
             cols.append(line.get_color())
+        else:
+            ax1.plot(Dint[k,z,7], Dint[k,z,2],'o',ms=4, color=cols[z])
+
     if X == projects[-1]:
         ax1.axis(xmax=Dint[:,:,7].max()*1.1, xmin=Dint[:,:,7].min()*1.1)
         ax1.set_xlabel('$\\mathsf{e}_\\mathsf{x}^\\mathsf{p}$')
@@ -123,7 +127,7 @@ for k, X in enumerate(projects):
     if X == projects[-1]:
         #ax4.axis('equal')
         ax4.set_ylabel('$\\tau_\\mathsf{x}$\n(ksi)')
-        ax4.set_xlabel('$\\tau_\\theta$\n(ksi)')
+        ax4.set_xlabel('$\\tau_\\theta$ (ksi)')
         f.ezlegend(ax4, title='W$_\\mathsf{p}$ (psi)', loc='lower left')
         f.myax(ax4)
 
@@ -131,8 +135,9 @@ p.savefig('../PTCalibration.png', bbox_inches='tight', dpi=150)
 p.show('all')
 
 
-Wp_calcs = n.arange(200,1100,100)/1000
+Wp_calcs = n.arange(400,1800,100)/1000
 
+projects = key[:,0].astype(int)
 for k,X in enumerate(projects):
 
     proj = '{}-{}'.format(prefix,X)
@@ -145,16 +150,19 @@ for k,X in enumerate(projects):
 
     Dint = interp1d(D[:,1],D,axis=0).__call__(Wp_calcs)
 
+    # erange1:  depx/depq over whole Wp range
     rng = (D[:,1]>=Wp_calcs[0]) & (D[:,1]<=Wp_calcs[-1])
-
     m,b = n.polyfit(D[rng,8],D[rng,7],1)
-
-    erange = n.array([m]*Dint.shape[0])
-
-    Dint = n.c_[Dint,erange]
-
-    header='[0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru'
+    erange1 = n.array([m]*Dint.shape[0])
+    # erange2:  depx/depq over moving window:  prev to next Wp_calcs[k]
+    erange2 = n.empty_like(erange1)*n.nan
+    for z in range(1,len(Wp_calcs)-1):
+        rng =  (D[:,1]>=Wp_calcs[z-1]) & (D[:,1]<=Wp_calcs[z+1])
+        m,b = n.polyfit(D[rng,8],D[rng,7],1)
+        erange2[z] = m
     
-    header='[0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru, [12]dexp/deqp'
-    n.savetxt('CalData_Interp.dat', X=Dint, fmt='%.3f'+', %.6f'*12, header=header)
+    Dint = n.c_[Dint,erange1, erange2]
+
+    header='[0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru, [12]dexp/deqp (all Wp), [13]dexp/deqp (moving)'
+    n.savetxt('CalData_Interp.dat', X=Dint, fmt='%.3f'+', %.6f'*13, header=header)
 
