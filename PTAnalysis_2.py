@@ -8,8 +8,7 @@ import os
 
 '''
 This script makes a 2x2 plot of the PT experiments, with dots at interpolated values of plastic
-work.  More importantly, it also calculates the strain ratio and stress state at these
-values of plastic work and save the file CalData_Interp.dat
+work.  It used to also do the Wp interpolation and save that file, but that has been merged into PTAnalysis1.  So this script only plots now.
 '''
 
 prefix = 'GMPT'
@@ -35,7 +34,6 @@ projects = key[:,0].astype(int)
 projects
 
 
-Wp_calcs = n.arange(400,1800,200)/1000
 
 for k,X in enumerate(projects):
 
@@ -43,14 +41,11 @@ for k,X in enumerate(projects):
     alpha, alpha_true, Rm, thickness = key[ key[:,0]==X].ravel()[4:8]
     os.chdir('../{}'.format(proj))
 
-    # [0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, 
-    # [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru
     D = n.genfromtxt('CalData.dat', delimiter=',')
-
-
-    Dinttemp = interp1d(D[:,1],D,axis=0).__call__(Wp_calcs)
+    Dinttemp = n.genfromtxt('CalData_Interp.dat', delimiter=',')[::2]
     if k == 0:
-        Dint = n.empty((len(projects),len(Wp_calcs),Dinttemp.shape[1]))
+        Wp_calcs = Dinttemp[:,1]
+        Dint = n.empty((len(projects),*Dinttemp.shape))
         fig, ax1, ax2, ax3, ax4 = f.makequad()
 
     Dint[k] = Dinttemp
@@ -63,9 +58,7 @@ for k,X in enumerate(projects):
     ax2.plot(D[:,8], D[:,3], label=ML, color=MC)
     
     #ax3:  Axial vs hoop stn
-    rng = (D[:,1]>=Wp_calcs[0]) & (D[:,1]<=Wp_calcs[-1])
-    m,b = n.polyfit(D[rng,8],D[rng,7],1)
-    ax3.plot(D[:,8],D[:,7], label='{:.3f}'.format(m), color=MC)
+    ax3.plot(D[:,8],D[:,7], label='{:.3f}'.format(Dint[k,0,12]), color=MC)
 
     #ax4:  Yield Surface
     ax4.plot(Dint[k,:,3], Dint[k,:,2], 'o', ms=4, color=MC)
@@ -134,35 +127,4 @@ for k, X in enumerate(projects):
 p.savefig('../PTCalibration.png', bbox_inches='tight', dpi=150)
 p.show('all')
 
-
-Wp_calcs = n.arange(400,1800,100)/1000
-
-projects = key[:,0].astype(int)
-for k,X in enumerate(projects):
-
-    proj = '{}-{}'.format(prefix,X)
-    alpha, alpha_true, Rm, thickness = key[ key[:,0]==X].ravel()[4:8]
-    os.chdir('../{}'.format(proj))
-
-    # [0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, 
-    # [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru
-    D = n.genfromtxt('CalData.dat', delimiter=',')
-
-    Dint = interp1d(D[:,1],D,axis=0).__call__(Wp_calcs)
-
-    # erange1:  depx/depq over whole Wp range
-    rng = (D[:,1]>=Wp_calcs[0]) & (D[:,1]<=Wp_calcs[-1])
-    m,b = n.polyfit(D[rng,8],D[rng,7],1)
-    erange1 = n.array([m]*Dint.shape[0])
-    # erange2:  depx/depq over moving window:  prev to next Wp_calcs[k]
-    erange2 = n.empty_like(erange1)*n.nan
-    for z in range(1,len(Wp_calcs)-1):
-        rng =  (D[:,1]>=Wp_calcs[z-1]) & (D[:,1]<=Wp_calcs[z+1])
-        m,b = n.polyfit(D[rng,8],D[rng,7],1)
-        erange2[z] = m
-    
-    Dint = n.c_[Dint,erange1, erange2]
-
-    header='[0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru, [12]dexp/deqp (all Wp), [13]dexp/deqp (moving)'
-    n.savetxt('CalData_Interp.dat', X=Dint, fmt='%.3f'+', %.6f'*13, header=header)
 
