@@ -102,7 +102,7 @@ for z in range(1,len(Wp_calcs)-1):
 Dint = n.c_[Dint,erange1, erange2]
 
 header = ('[0]Wp (ksi), [1]SigX_Tru (ksi), [2]eax_tot, [3]eq_tot, '+
-		  '[4]eax_p, [5]eq_p, [6]ez_p, [7]dexp/deqp, [8]dexp/deqp (moving)')
+		  '[4]eax_p, [5]eq_p, [6]ez_p, [7]deqp/dexp, [8]deqp/dexp (moving)')
 n.savetxt('../Uniaxial/Uniax_6061_{}/CalData_Iterp.dat'.format(x), X=Dint,
 			delimiter=', ', fmt='%.6f',header=header)
 

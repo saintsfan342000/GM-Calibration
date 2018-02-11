@@ -122,30 +122,30 @@ if calc_rawdata:
     
 # Calculate the plastic data
 for k,expt in enumerate(projects):
-
     proj = '{}-{}'.format(prefix,expt)
     alpha, alpha_true, Rm, thickness = key[ key[:,0]==expt].ravel()[4:8]
     os.chdir('../{}'.format(proj))
+    print(proj)
 
     # [0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, 
     # [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru
     D = n.genfromtxt('CalData.dat', delimiter=',')
     Dint = interp1d(D[:,1],D,axis=0).__call__(Wp_calcs)
 
-    # erange1:  depx/depq over whole Wp range
+    # erange1:  depq/depx over whole Wp range
     rng = (D[:,1]>=Wp_calcs[0]) & (D[:,1]<=Wp_calcs[-1])
-    m,b = n.polyfit(D[rng,8],D[rng,7],1)
+    m,b = n.polyfit(D[rng,7],D[rng,8],1)
     erange1 = n.array([m]*Dint.shape[0])
-    # erange2:  depx/depq over moving window:  prev to next Wp_calcs[k]
+    # erange2:  depq/depx over moving window:  prev to next Wp_calcs[k]
     erange2 = n.empty_like(erange1)*n.nan
     for z in range(1,len(Wp_calcs)-1):
         rng =  (D[:,1]>=Wp_calcs[z-1]) & (D[:,1]<=Wp_calcs[z+1])
-        m,b = n.polyfit(D[rng,8],D[rng,7],1)
+        m,b = n.polyfit(D[rng,7],D[rng,8],1)
         erange2[z] = m
     
     Dint = n.c_[Dint,erange1, erange2]
 
-    header='[0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru, [12]dexp/deqp (all Wp), [13]dexp/deqp (moving)'
+    header='[0]Stage, [1]Wp, [2]SigX_Tru, [3]SigQ_True, [4]ex, [5]eq, [6]e3, [7]ep_x, [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru, [12]deqp/dexp (all Wp), [13]deqp/dexp (moving)'
     n.savetxt('CalData_Interp.dat', X=Dint, fmt='%.3f'+', %.6f'*13, header=header)
 
     if makeplots == True:
@@ -176,19 +176,19 @@ for k,expt in enumerate(projects):
         f.myax(ax1)
 
         #ax2:  Stn-Stn
-        ax2.plot(D[:,8]*100, D[:,7]*100)
+        ax2.plot(D[:,7]*100, D[:,8]*100)
         for C,X in enumerate(Dint):
-            ax2.plot(X[8]*100,X[7]*100,'o', mfc=cols[C].get_mfc(),
+            ax2.plot(X[7]*100,X[8]*100,'o', mfc=cols[C].get_mfc(),
                      mec=cols[C].get_mec(),label='W$_p$={:.1f}'.format(Wp_calcs[C]))
         rng = (D[:,1]>=Wp_calcs[0]) & (D[:,1]<=Wp_calcs[-1])
-        m,b = n.polyfit(D[rng,8]*100, 100*D[rng,7], 1)
-        x = n.array([ D[rng,8].min(), D[rng,8].max() ])*100
+        m,b = n.polyfit(D[rng,7]*100, 100*D[rng,8], 1)
+        x = n.array([ D[rng,7].min(), D[rng,7].max() ])*100
         y = m*x+b
         ax2.plot(x,y,'k-', zorder=-5)
-        f.eztext(ax2, '$\\frac{de_x^p}{de_\\theta^p}=$'+'{:.3f}'.format(m), 'br')
-        ax2.axis(xmin=D[:,8].min())
-        ax2.set_ylabel('$\\mathsf{e}_\\mathsf{x}^\\mathsf{p}$\n(%)')
-        ax2.set_xlabel('$\\mathsf{e}_\\mathsf{\\theta}^\\mathsf{p}$ (%)')
+        f.eztext(ax2, '$\\frac{de_\\theta^p}{de_x^p}=$'+'{:.3f}'.format(m), 'tr')
+        #ax2.axis(xmin=D[:,8].min())
+        ax2.set_xlabel('$\\mathsf{e}_\\mathsf{x}^\\mathsf{p}$\n(%)')
+        ax2.set_ylabel('$\\mathsf{e}_\\mathsf{\\theta}^\\mathsf{p}$ (%)')
         f.myax(ax2)
 
         stf = n.genfromtxt('STPF.dat', delimiter=',')

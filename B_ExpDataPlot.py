@@ -20,7 +20,7 @@ This script makes a 2x2 plot of the PT experiments, with dots at interpolated va
 work.  It used to also do the Wp interpolation and save that file, but that has been merged into PTAnalysis1.  So this script only plots now.
 '''
 
-withuni = 0
+withuni = 3
 
 # [0]Expt No., [1]Mon.Day, [2]Material, [3]Tube No., [4]Alpha, [5]Alpha-True, [6]Mean Radius, [7]Thickness, [8]Eccentricity
 key = n.genfromtxt('../PTSummary.dat', delimiter=',')
@@ -53,7 +53,7 @@ for k,X in enumerate(projects):
     ax2.plot(D[:,8], D[:,3], label=ML, color=MC)
     
     #ax3:  Axial vs hoop stn
-    ax3.plot(D[:,8],D[:,7], label='{:.3f}'.format(Dint[k,0,12]), color=MC)
+    ax3.plot(D[:,8],D[:,7], label='{:.3f}'.format(1/Dint[k,0,12]), color=MC)
 
     #ax4:  Yield Surface
     # Plotting an expt at different Wps as markers of same color
