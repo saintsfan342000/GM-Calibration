@@ -4,7 +4,7 @@ from pandas import read_csv
 from scipy.interpolate import interp1d
 from scipy.integrate import cumtrapz
 import figfun as f
-p.style.use('mysty')
+p.style.use('mysty-sub')
 
 '''
 This gets the log plastic strains, stresses, and ratios 
@@ -17,7 +17,7 @@ the SGs popped off expts 1 and 2 at Wp levels of ~1000 and 400 psi, rectively.
 By using the DIC expt I can use the data up to an arbitrarily large Wp
 '''
 
-x = 3
+x = 1
 mat=6061
 # Only expts 1 and 2 used SGs and need an sgcut
 sgcut = ['worthless', 0.03, 0.014, 'worthless']
@@ -42,7 +42,7 @@ if x in [1,2]:
     etr = n.mean(LV[:,[5,7]],axis=1)
     
     # Cut strain gages and stress to below sgcut
-    loc = n.nonzero(eax>=sgcut[k])[0][0]
+    loc = n.nonzero(eax>=sgcut[x])[0][0]
     for e in ['eax','etr','S']:
         exec('{0} = {0}[:loc]'.format(e))
 
@@ -79,11 +79,13 @@ n.savetxt('../Uniaxial/Uniax_6061_{}/CalData.dat'.format(x), X=D,
         delimiter=', ', fmt='%.6f',header=header)
 
 # Define our plastic work interpolation
-if x in [1,3]:
+if x ==3 :
     Wp_calcs = n.arange(400,1800,100)/1000
 elif x == 2:
     # I know it only got up to 400 psi before SGs popped off
-    Wp_calcs = n.arange(.2, .5, .1) 
+    Wp_calcs = n.arange(200,500,100)/1000
+elif x == 1:
+    Wp_calcs  = n.arange(400,1100,100)/1000
    
 Dint = interp1d(D[:,0],D,axis=0).__call__(Wp_calcs)
 # erange1:  depx/depq over whole Wp range
@@ -104,3 +106,33 @@ header = ('[0]Wp (ksi), [1]SigX_Tru (ksi), [2]eax_tot, [3]eq_tot, '+
 n.savetxt('../Uniaxial/Uniax_6061_{}/CalData_Iterp.dat'.format(x), X=Dint,
 			delimiter=', ', fmt='%.6f',header=header)
 
+
+if x == 3:  Dint = Dint[::2]
+
+# Plot!
+fig, ax1, ax2 = f.make21()
+
+# ax1:  sts-stn with Wp points
+ax1.plot(eaxp, T)
+cols = []
+for k, (e,s,w) in enumerate(zip(Dint[:,4], Dint[:,1], Dint[:,0])):
+    l, = ax1.plot(e,s,'o')
+    cols.append(l.get_mfc())
+    ax1.plot([],[],cols[-1],label='{:.0f}'.format(w*1000))
+ax1.set_xlabel('$\\mathsf{e}_\\mathsf{x}^\\mathsf{p}$')
+ax1.set_ylabel('$\\sigma_\\mathsf{x}$\n(ksi)')
+f.myax(ax1)
+f.ezlegend(ax1, title="$\\mathsf{W}_\\mathsf{p} (\\mathsf{psi})$")
+
+# ax2:  stn-stn with Wp points
+ax2.plot(eaxp, -etrp)
+for k, (e,t,w) in enumerate(zip(Dint[:,4], Dint[:,5], Dint[:,0])):
+    ax2.plot(e,-t,'o',mec=cols[k], mfc=cols[k])
+ax2.set_xlabel('$\\mathsf{e}_\\mathsf{x}^\\mathsf{p}$')
+ax2.set_ylabel('$\\mathsf{e}_\\theta^\\mathsf{p}$')
+f.eztext(ax2, '$\\mathsf{de}_\\theta^\\mathsf{p}/\\mathsf{de}_\\mathsf{x}^\\mathsf{p}=.' + 
+        '\\mathsf{' + '{:.0f}'.format(-Dint[2,7]*1000) + '}$')
+f.myax(ax2)
+
+p.savefig('../Uniaxial/Uniax_6061_{}/CalData.png'.format(x), dpi=100, bbox_inches='tight')
+p.close()
