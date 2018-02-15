@@ -4,14 +4,18 @@ from scipy.optimize import (minimize,
                             differential_evolution)
 from scipy.interpolate import griddata
 import sympy as sp
-from sympy.utilities.autowrap import ufuncify
-lam_or_ufun = 'ufuncify'
+from sympy.utilities.autowrap import ufuncify, autowrap
+lam_or_auto = 'auto'
 uni = 3
 key = n.genfromtxt('../PTSummary.dat', delimiter=',')
 projects = key[:,0].astype(int)
+eqbiax = 8
+
 
 # Weights for flow sts, stn rat
 w_s, w_e = 1, 0.1
+# Weight amplification factors for uniaixial sts, stn, and balanced biaxial
+wu_s, wu_e, wrb = sp.symbols('wu_s, wu_e, wrb', positive = True)
 # Plastic work level
 Wp = 1 #ksi
 
@@ -28,19 +32,20 @@ with open('Yld04.txt', 'r') as fid:
     PHI = eval(fid.readline())
     dPHI = eval(fid.readline())
 
-# Exp. stresses
-exp_sts = n.empty((1+len(projects),2))
+# [0] SigX, sigQ, r
+exp_sts = n.empty((1+len(projects),3))
 
 # Uniaxial
-# [0]Wp (ksi), [1]SigX_Tru (ksi), [2]eax_tot, [3]eq_tot, [4]eax_p, [5]eq_p, [6]ez_p, [7]deqp/dexp, [8]deqp/dexp (moving)
+# [0]Wp (ksi), [1]SigX_Tru (ksi), [2]eax_tot, [3]eq_tot, [4]eax_p, [5]eq_p, 
+# [6]ez_p, [7]deqp/dexp, [8]deqp/dexp (moving)
 d = n.genfromtxt('../Uniaxial/Uniax_6061_{}/CalData_Interp.dat'.format(uni), delimiter=',')
 stsx, r = d[ d[:,0] == Wp, [1,7] ].ravel()
-exp_sts[0] = stsx,0
+exp_sts[0] = stsx,0, r
 SIGO = stsx
 sublist = ((sx,stsx),(sq,0),(sr,0))
 A = dPHI.subs(sublist)
 B = (PHI.subs(sublist)/4)**(1/8)
-E = w_e*(A/r - 1)**2 + w_s*(B/SIGO - 1)**2
+E = wu_e*w_e*(A/r - 1)**2 + wu_s*w_s*(B/SIGO - 1)**2
 print('Looping')
 # PT
 for k,x in enumerate(projects):
@@ -48,109 +53,97 @@ for k,x in enumerate(projects):
     # [8]ep_q, [9]ep_3, [10]R_tru, [11]th_tru, [12]deqp/dexp (all Wp), [13]deqp/dexp (moving)
     d = n.genfromtxt('../GMPT-{}/CalData_Interp.dat'.format(x), delimiter=',')
     stsx, stsq, r = d[ d[:,1] == Wp, [2,3,12] ].ravel()
-    exp_sts[k+1] = stsx,stsq
+    exp_sts[k+1] = stsx,stsq, r
     sublist = ((sx,stsx),(sq,stsq),(sr,0))
     A = dPHI.subs(sublist)
     B = (PHI.subs(sublist)/4)**(1/8)
-    E += w_e*(A/r - 1)**2 + w_s*(B/SIGO - 1)**2
+    if x == 8:
+        E += wrb*w_e*(A/r - 1)**2 + w_s*(B/SIGO - 1)**2
+    else:
+        E += w_e*(A/r - 1)**2 + w_s*(B/SIGO - 1)**2
+
 print('differentiating')
 # Derivatives of E w.r.t. each c
 dE = [E.diff(i) for i in varlist]
 print('lambdifying')
 
-if lam_or_ufun == 'ufuncify':
-    # ufuncify evaluations of fun(x) are ~40 microsec vs 720 microsec for lambdify
-    # ufuncify evaluations of jac(x) are 1.1 microsec vs 25 microsec for lamdify
+if lam_or_auto == 'auto':
+    # Evlau times for fun(x):
+    # lamdify:  ~700 micsec.  ufuncify:  ~40 micsec.  autowrap:  ~7 micsec
+    # Eval times for jac(x)
+    # lambdify:  ~25 *milli*sec.  ufuncify:  1 *mili*sec autowrap:  ~120 micsec
+    # ufuncify evaluations of jac(x) are 1.1 microsec vs 25 millisec for lamdify
     # It's also slightly (5 to 10 %) to pass x[0], x[1],... instead of *x 
-    F = ufuncify(varlist,E)
-    # ufuncify can't return a list like lamdify can
+    F = autowrap(E, args=(*varlist, wu_s, wu_e, wrb))
+    # autowrap can't return a list like lamdify can
     dF = [0]*12
     for i in range(12):
-        dF[i] = ufuncify(varlist,dE[i])
+        dF[i] = autowrap(dE[i], args=(*varlist, wu_s, wu_e, wrb))
     
-    def fun(x):
+    def fun(x,wu_s, wu_e, wrb):
         return F(x[0], x[1], x[2], x[3], x[4], x[5],
-                x[6],x[7],x[8],x[9],x[10],x[11])
+                x[6],x[7],x[8],x[9],x[10],x[11], wu_s, wu_e, wrb)
     
-    def jac(x):
-        return n.array([dF[i](*x) for i in range(12)])
+    def jac(x, wu_s, wu_e, wrb):
+        return n.array([dF[i](*x, wu_s, wu_e, wrb) for i in range(12)])
 else:
-    F = sp.lambdify(varlist, E)
-    dF = sp.lambdify(varlist, dE)
+    F = sp.lambdify((*varlist, wu_s, wu_e, wrb), E)
+    dF = sp.lambdify((*varlist, wu_s, wu_e, wrb), dE)
     
-    def fun(x):
+    def fun(x, wu_s, wu_e, wrb):
         return F(x[0], x[1], x[2], x[3], x[4], x[5],
-                x[6],x[7],x[8],x[9],x[10],x[11])
+                x[6],x[7],x[8],x[9],x[10],x[11], 
+                wu_s, wu_e, wrb)
 
     def jac(x):
         return n.array(dF(x[0], x[1], x[2], x[3], x[4], x[5],
-                x[6],x[7],x[8],x[9],x[10],x[11]))
+                x[6],x[7],x[8],x[9],x[10],x[11], 
+                wu_s, wu_e, wrb))
 
-print('minimizing')
-res1 = minimize(fun,
-                  n.ones(12),
-                  jac=jac,
-                  method='Nelder-Mead',
-                  options={'maxiter':10000, 'maxfev':10000})
+# Specify algorithm, weights
+algs = ['Nelder-Mead', 'BFGS', 'CG', 'basinhopping']
+wu_s_arr = [10,5,1]
+wu_e_arr = [10,5,1]
+wrb_arr = [10,5,1]
 
-res2 = minimize(fun,
-                  n.ones(12),
-                  jac=jac,
-                  method='BFGS',
-                  options={'maxiter':10000, 'maxfev':10000})
-
-res3 = minimize(fun,
-                  n.ones(12),
-                  jac=jac,
-                  method='CG',
-                  options={'maxiter':10000, 'maxfev':10000})
-#  Much slower if fun is lamdified b/c this makes over 100,000 function evals!
-res4 = basinhopping(fun,
-                    n.ones(12),
+# Generic minimizer call
+def callmin(alg, wu_s, wu_e, wrb):
+    if alg in algs[:-1]:
+        res = minimize(fun,
+                      x0 = n.ones(12),
+                      args = (wu_s, wu_e, wrb),
+                      jac=jac,
+                      method=alg,
+                      options={'maxiter':10000, 'maxfev':10000})
+    else:
+        res = basinhopping(fun,
+                    x0 = n.ones(12),
+                    minimizer_kwargs={'args':(wu_s, wu_e, wrb)},
                     niter=100
                     )
+    return res
 
-[i.x for i in [res1,res2,res3,res4]]
-[i.message for i in [res1,res2,res3,res4]]
-[i.fun for i in [res1,res2,res3,res4]]
-[i.nfev for i in [res1,res2,res3,res4]]
-
-# Do I determine SIGO now from the calibration at the sr=sq=0?
-x = n.linspace(0,1.2,100)
-y = x.copy()
-X,Y = n.meshgrid(x,y)
-
-sublist = [(varlist[i], res4.x[i]) for i in range(12)]
-
-phi1 = PHI.subs(sublist)
-phi1 = (phi1/(4))**.125/SIGO
-phi = sp.lambdify((sr,sq,sx),phi1, 'numpy')
-
-Z = phi(0,X*SIGO,Y*SIGO)
-# Important note!  phi(0,0,SIGO) won't evaluate to 1, or to
-# the locus's value at sq=0,sr=SIGO since the uniaxial yield sts SIGO
-# doesn't land on the locus itself.  What that gives you is SIGO/intersection!
-# In other words, all points on the locus evaluate to phi = 1.  But since the uniaxial point 
-# SIGO isn't even on the locus.  
-
-import matplotlib.pyplot as p
-
-p.contour(X,Y,Z,levels=[1])
-p.plot(exp_sts[:,1]/SIGO, exp_sts[:,0]/SIGO,'ro')
-
-def plotpoint():
-    loc = n.asarray(p.ginput(1)).ravel()
-    #p.plot(loc[0],phi(0,loc[0]*SIGO,loc[1]*SIGO),'ro')
-    print( phi(0,loc[0]*SIGO,loc[1]*SIGO))
-'''
-[array([0.961635, 1.1259, 1.06189, 0.529042, 1.10732, 0.503277, 0.119869, 0.559774, 1.21067, 1.21762, 1.08453, 1.284]),
- array([-0.871706, -0.588812, 0.871706, 0.282894, -0.234004, -0.194853, -0.131771, 1.45379, -0.327191, -1.36011, -0.449007, 0.665625]),
- array([0.00552604, 0.989272, 0.995557, -0.0058843, -0.000759139, 0.984147, 0.00552604, 0.989272, 0.995557, -0.0058843, -0.000759139, 0.984147]),
- array([2.43932, -0.0839988, -2.44011, -2.52375, -1.10794, 0.148537, 2.58464, 0.673638, -1.97157, -0.961163, 1.12249, 1.57473])]
-'''
-
+# Result files
+# Loop through algorithms and weights
+for alg in algs:
+    print('Minimizing {}'.format(alg))
+    arr = n.empty((27,16))
+    row = 0
+    for wus in [100,10,1]:
+        for wue in [100,10,1]:
+            for wrb in [100,10,1]:
+                res = callmin(alg, wus, wue, wrb)
+                arr[row] = [res.fun, wus, wue, wrb, *(res.x)]
+                row += 1
+    n.savetxt('../CalResults/{}.dat'.format(alg),
+            X = arr,
+            header = '[0]E value, [1]Uni-Sts Wt, [2]Uni-r wt, [3]rb wt, [4-15]cij...',
+            fmt = '%.6f, %.0f, %.0f, %.0f, ' + '%.6f, '*11 + '%.6f'
+            )
 
 '''
+Dilling works for lambdified expressions, but not ufuncified expressions
+
 import dill
 dill.settings['recurse'] = True
 fid = open('file', 'wb') # must have the b for binary!
@@ -159,4 +152,14 @@ fid.close()
 fid = open('file','rb')
 fun = dill.load(fid)
 fid.close()
+
+But for ufuncified expressions, you can pass the kwarg tempdir
+with which you specify a directory to keep the files it generates 
+One of these will be called "wrapper_module_n", where n is 0 or 1.
+In a different session, you can "import wrapper_module_n".
+The ufuncified expression is called as wrapper_module_n.autofunc(arg1,argw...)
+
+see https://stackoverflow.com/questions/1260792/import-a-file-from-a-subdirectory
+for how I can stick those into a subdir to keep main dir tidy
+
 '''
