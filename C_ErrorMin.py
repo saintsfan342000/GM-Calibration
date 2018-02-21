@@ -5,10 +5,22 @@ from scipy.optimize import (minimize,
 from scipy.interpolate import griddata
 import sympy as sp
 from sympy.utilities.autowrap import ufuncify, autowrap
-lam_or_auto = 'auto'
+lam_or_auto = 'lambdify'
 uni = 3
 key = n.genfromtxt('../PTSummary.dat', delimiter=',')
 projects = key[:,0].astype(int)
+# Specify any expts you want to exclude
+excludes = [10]
+savedir = '../CalResults/Exclude_PT10'
+projects = projects[ ~n.in1d(projects, excludes) ]
+
+if len(excludes) > 0:
+        printstr = '***!!!CHANGE YOUR SAVE DIRECTORY!!!***\n'
+        print(printstr*5)
+        ans = input('Have you changed the save-directory? yes or no:  '  )
+        if ans not in ['yes', 'Yes', 'YES', 'y', 'Y']:
+            raise ValueError('You need to makesure your savedirectory is properly set')
+        
 eqbiax = 8
 
 
@@ -95,7 +107,7 @@ else:
                 x[6],x[7],x[8],x[9],x[10],x[11], 
                 wu_s, wu_e, wrb)
 
-    def jac(x):
+    def jac(x, wu_s, wu_e, wrb):
         return n.array(dF(x[0], x[1], x[2], x[3], x[4], x[5],
                 x[6],x[7],x[8],x[9],x[10],x[11], 
                 wu_s, wu_e, wrb))
@@ -135,7 +147,7 @@ for alg in algs:
                 res = callmin(alg, wus, wue, wrb)
                 arr[row] = [res.fun, wus, wue, wrb, *(res.x)]
                 row += 1
-    n.savetxt('../CalResults/{}.dat'.format(alg),
+    n.savetxt('{}/{}.dat'.format(savedir, alg),
             X = arr,
             header = '[0]E value, [1]Uni-Sts Wt, [2]Uni-r wt, [3]rb wt, [4-15]cij...',
             fmt = '%.6f, %.0f, %.0f, %.0f, ' + '%.6f, '*11 + '%.6f'
