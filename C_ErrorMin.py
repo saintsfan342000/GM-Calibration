@@ -2,22 +2,22 @@ import numpy as n
 from scipy.optimize import (minimize,
                             basinhopping, 
                             differential_evolution)
-from scipy.interpolate import griddata
+from scipy.interpolate import griddata, interp1d
 import sympy as sp
+import matplotlib.pyplot as p
 from sympy.utilities.autowrap import ufuncify, autowrap
-lam_or_auto = 'lambdify'
+lam_or_auto = 'auto'
 uni = 3
 key = n.genfromtxt('../PTSummary.dat', delimiter=',')
 projects = key[:,0].astype(int)
 # Specify any expts you want to exclude
 excludes = [10]
-savedir = '../CalResults/Exclude_PT10'
 projects = projects[ ~n.in1d(projects, excludes) ]
-
+savedir = '../CalResults/Weight_BothUni'
 if len(excludes) > 0:
         printstr = '***!!!CHANGE YOUR SAVE DIRECTORY!!!***\n'
         print(printstr*5)
-        ans = input('Have you changed the save-directory? yes or no:  '  )
+        ans = input('Have you changed the save-directory? \nCurrently set to: {} yes or no:  '.format(savedir)  )
         if ans not in ['yes', 'Yes', 'YES', 'y', 'Y']:
             raise ValueError('You need to makesure your savedirectory is properly set')
         
@@ -58,6 +58,7 @@ sublist = ((sx,stsx),(sq,0),(sr,0))
 A = dPHI.subs(sublist)
 B = (PHI.subs(sublist)/4)**(1/8)
 E = wu_e*w_e*(A/r - 1)**2 + wu_s*w_s*(B/SIGO - 1)**2
+E_raw = (A/r - 1)**2 + (B/SIGO - 1)**2
 print('Looping')
 # PT
 for k,x in enumerate(projects):
@@ -69,17 +70,22 @@ for k,x in enumerate(projects):
     sublist = ((sx,stsx),(sq,stsq),(sr,0))
     A = dPHI.subs(sublist)
     B = (PHI.subs(sublist)/4)**(1/8)
+    # Exception for balanced biaxial:  Give it wrb
     if x == 8:
         E += wrb*w_e*(A/r - 1)**2 + w_s*(B/SIGO - 1)**2
+    # Exception for pure hoop sts:  give it Wu_e and wu_s
+    if x == 11:
+        E += wu_e*w_e*(A/r - 1)**2 + wu_s*w_s*(B/SIGO - 1)**2
     else:
         E += w_e*(A/r - 1)**2 + w_s*(B/SIGO - 1)**2
+    E_raw += (A/r - 1)**2 + (B/SIGO - 1)**2
 
 print('differentiating')
 # Derivatives of E w.r.t. each c
 dE = [E.diff(i) for i in varlist]
-print('lambdifying')
 
 if lam_or_auto == 'auto':
+    print('autowrapping!')
     # Evlau times for fun(x):
     # lamdify:  ~700 micsec.  ufuncify:  ~40 micsec.  autowrap:  ~7 micsec
     # Eval times for jac(x)
@@ -87,6 +93,7 @@ if lam_or_auto == 'auto':
     # ufuncify evaluations of jac(x) are 1.1 microsec vs 25 millisec for lamdify
     # It's also slightly (5 to 10 %) to pass x[0], x[1],... instead of *x 
     F = autowrap(E, args=(*varlist, wu_s, wu_e, wrb))
+    E_raw_val = autowrap(E_raw, args=varlist)
     # autowrap can't return a list like lamdify can
     dF = [0]*12
     for i in range(12):
@@ -98,10 +105,12 @@ if lam_or_auto == 'auto':
     
     def jac(x, wu_s, wu_e, wrb):
         return n.array([dF[i](*x, wu_s, wu_e, wrb) for i in range(12)])
+
 else:
+    print('lambdifying :(')
     F = sp.lambdify((*varlist, wu_s, wu_e, wrb), E)
     dF = sp.lambdify((*varlist, wu_s, wu_e, wrb), dE)
-    
+    E_raw_val = sp.lambdify(*varlist, E_raw)
     def fun(x, wu_s, wu_e, wrb):
         return F(x[0], x[1], x[2], x[3], x[4], x[5],
                 x[6],x[7],x[8],x[9],x[10],x[11], 
@@ -112,11 +121,9 @@ else:
                 x[6],x[7],x[8],x[9],x[10],x[11], 
                 wu_s, wu_e, wrb))
 
+    
 # Specify algorithm, weights
 algs = ['Nelder-Mead', 'BFGS', 'CG', 'basinhopping']
-wu_s_arr = [10,5,1]
-wu_e_arr = [10,5,1]
-wrb_arr = [10,5,1]
 
 # Generic minimizer call
 def callmin(alg, wu_s, wu_e, wrb):
@@ -135,23 +142,59 @@ def callmin(alg, wu_s, wu_e, wrb):
                     )
     return res
 
+def getcontour(res,N=100):
+    '''
+    Just return the locus as x,y coords.  Don't plot
+    '''
+    x = n.linspace(0,1.2,N)
+    y = x.copy()
+    X,Y = n.meshgrid(x,y)
+    sublist = [(varlist[i], res[i]) for i in range(12)]
+    phi1 = PHI.subs(sublist)
+    phi1 = (phi1/(4))**.125/SIGO
+    phi = sp.lambdify((sr,sq,sx),phi1, 'numpy')
+    Z = phi(0,X*SIGO,Y*SIGO)
+    p.figure()
+    c = p.contour(Y,X,Z,levels=[1])
+    p.close()
+    return c.allsegs[0][0]
+
 # Result files
 # Loop through algorithms and weights
+# Saving AlgName.dat with score, weights, and coefficients
+# Then saving AlgName.npy with locus for plotting
 for alg in algs:
     print('Minimizing {}'.format(alg))
-    arr = n.empty((27,16))
+    results = n.empty((27,16))
     row = 0
     for wus in [100,10,1]:
         for wue in [100,10,1]:
             for wrb in [100,10,1]:
                 res = callmin(alg, wus, wue, wrb)
-                arr[row] = [res.fun, wus, wue, wrb, *(res.x)]
+                results[row] = [E_raw_val(*(res.x)), wus, wue, wrb, *(res.x)]
                 row += 1
     n.savetxt('{}/{}.dat'.format(savedir, alg),
-            X = arr,
+            X = results,
             header = '[0]E value, [1]Uni-Sts Wt, [2]Uni-r wt, [3]rb wt, [4-15]cij...',
             fmt = '%.6f, %.0f, %.0f, %.0f, ' + '%.6f, '*11 + '%.6f'
             )
+    # I just want to get the surace locus for each for easy plotting
+    N = 200
+    # A 3D array of the locus for each of the results
+    locus = n.empty((results.shape[0],N,2))
+    for z in range(results.shape[0]):
+        # Annoyingly, the number of points in each locus changes
+        tempxy = getcontour(results[z,4:], N)
+        # So I need in interpolate based on the angle (since it is single-valued)
+        q = n.arctan2(tempxy[:,1],tempxy[:,0])
+        qspace = n.linspace(q.min(),q.max(),N)
+        locus[z,:,:] = interp1d(q,tempxy, axis=0, fill_value='extrapolate').__call__(qspace)
+    n.save('{}/{}-locus.npy'.format(savedir,alg), locus)
+
+
+
+
+
 
 '''
 Dilling works for lambdified expressions, but not ufuncified expressions
