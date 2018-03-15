@@ -6,24 +6,31 @@ from scipy.interpolate import griddata, interp1d
 import sympy as sp
 import matplotlib.pyplot as p
 from sympy.utilities.autowrap import ufuncify, autowrap
+
+'''
+Calibrates the YLD04-3D yield function
+'''
+
+# User parameters
 lam_or_auto = 'auto'
 uni = 3
-key = n.genfromtxt('../PTSummary.dat', delimiter=',')
-projects = key[:,0].astype(int)
+eqbiax = 8
 # Specify any expts you want to exclude
 excludes = [10]
+# Where the results are being saved
+savedir = '../CalResults/Weight_BothUni2'
+
+key = n.genfromtxt('../PTSummary.dat', delimiter=',')
+projects = key[:,0].astype(int)
 projects = projects[ ~n.in1d(projects, excludes) ]
-savedir = '../CalResults/Weight_BothUni'
 if len(excludes) > 0:
         printstr = '***!!!CHANGE YOUR SAVE DIRECTORY!!!***\n'
         print(printstr*5)
-        ans = input('Have you changed the save-directory? \nCurrently set to: {} yes or no:  '.format(savedir)  )
+        ans = input('Have you changed the save-directory? \n' +
+                    'Currently set to: {} yes or no:  '.format(savedir)  )
         if ans not in ['yes', 'Yes', 'YES', 'y', 'Y']:
             raise ValueError('You need to makesure your savedirectory is properly set')
         
-eqbiax = 8
-
-
 # Weights for flow sts, stn rat
 w_s, w_e = 1, 0.1
 # Weight amplification factors for uniaixial sts, stn, and balanced biaxial
@@ -31,22 +38,53 @@ wu_s, wu_e, wrb = sp.symbols('wu_s, wu_e, wrb', positive = True)
 # Plastic work level
 Wp = 1 #ksi
 
-
+# Symbols to generate the Yield Function 
 sr, sx, sq = sp.var('sr, sx, sq')
 (cp12,cp13,cp21,cp23,cp31,cp32) = sp.var("cp12,cp13,cp21,cp23,cp31,cp32")
 (cpp12,cpp13,cpp21,cpp23,cpp31,cpp32) = sp.var("cpp12,cpp13,cpp21,cpp23,cpp31,cpp32")
 varlist = (cp12,cp13,cp21,cp23,cp31,cp32,cpp12,cpp13,cpp21,cpp23,cpp31,cpp32)
 cp44, cp55, cpp44, cpp55, cp66, cpp66 = 1, 1, 1, 1, 1, 1
 
-# Line 0:  PHI
-# Line 1: dPHI/dsq / dPHI/dsx
-with open('Yld04.txt', 'r') as fid:
-    PHI = eval(fid.readline())
-    dPHI = eval(fid.readline())
+Cp = sp.zeros(6,6)
+Cp[0,1], Cp[0,2] = -cp12, -cp13
+Cp[1,0], Cp[1,2] = -cp21, -cp23
+Cp[2,0], Cp[2,1] = -cp31, -cp32
+Cp[3,3], Cp[4,4], Cp[5,5] = cp44, cp55, cp66
 
+Cpp = sp.zeros(6,6)
+Cpp[0,1], Cpp[0,2] = -cpp12, -cpp13
+Cpp[1,0], Cpp[1,2] = -cpp21, -cpp23
+Cpp[2,0], Cpp[2,1] = -cpp31, -cpp32
+Cpp[3,3], Cpp[4,4], Cpp[5,5] = cpp44, cpp55, cpp66
+
+T = sp.zeros(6,6)
+T[0,0], T[0,1], T[0,2] = 2, -1, -1
+T[1,0], T[1,1], T[1,2] = -1, 2, -1
+T[2,0], T[2,1], T[2,2] = -1, -1, 2
+T[3,3], T[4,4], T[5,5] = 3, 3, 3
+T*=sp.Rational(1,3)
+
+s = sp.Matrix([sr, sq, sx, 0, 0, 0])
+Sp = (Cp*T*s)[:3]
+Spp = (Cpp*T*s)[:3]
+
+a = 8
+PHI = ( (Sp[0]-Spp[0])**a + 
+      (Sp[0]-Spp[1])**a + 
+      (Sp[0]-Spp[2])**a + 
+      (Sp[1]-Spp[0])**a + 
+      (Sp[1]-Spp[1])**a + 
+      (Sp[1]-Spp[2])**a + 
+      (Sp[2]-Spp[0])**a + 
+      (Sp[2]-Spp[1])**a + 
+      (Sp[2]-Spp[2])**a
+    )
+
+dPHI = PHI.diff(sq)/PHI.diff(sx)
+
+# Now Load up experimental data and build up the error function
 # [0] SigX, sigQ, r
 exp_sts = n.empty((1+len(projects),3))
-
 # Uniaxial
 # [0]Wp (ksi), [1]SigX_Tru (ksi), [2]eax_tot, [3]eq_tot, [4]eax_p, [5]eq_p, 
 # [6]ez_p, [7]deqp/dexp, [8]deqp/dexp (moving)
@@ -99,7 +137,7 @@ if lam_or_auto == 'auto':
     for i in range(12):
         dF[i] = autowrap(dE[i], args=(*varlist, wu_s, wu_e, wrb))
     
-    def fun(x,wu_s, wu_e, wrb):
+    def fun(x, wu_s, wu_e, wrb):
         return F(x[0], x[1], x[2], x[3], x[4], x[5],
                 x[6],x[7],x[8],x[9],x[10],x[11], wu_s, wu_e, wrb)
     
@@ -127,7 +165,7 @@ algs = ['Nelder-Mead', 'BFGS', 'CG', 'basinhopping']
 
 # Generic minimizer call
 def callmin(alg, wu_s, wu_e, wrb):
-    if alg in algs[:-1]:
+    if alg in ['Nelder-Mead', 'BFGS', 'CG']:
         res = minimize(fun,
                       x0 = n.ones(12),
                       args = (wu_s, wu_e, wrb),
